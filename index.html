@@ -68,6 +68,7 @@
   let sortDir = 1; // 1 asc, -1 desc
 
   function splitCSVLine(line) {
+    return line.split(";").map(s => s.trim());
     const out = [];
     let cur = "", inQ = false;
     for (let i = 0; i < line.length; i++) {
