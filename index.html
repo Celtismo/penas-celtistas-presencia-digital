@@ -115,8 +115,8 @@ function parseCSV(text){
 }
 
 function isNum(v){
-  const s = String(v ?? "").trim();
-  return s !== "" && !isNaN(s);
+  const n = Number(String(v ?? "").replace(/\./g,"").replace(/,/g,""));
+  return !isNaN(n);
 }
 
 function formatNum(v){
