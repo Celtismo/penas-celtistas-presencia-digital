@@ -1,0 +1,188 @@
+<!doctype html>
+<html lang="es">
+<head>
+<meta charset="utf-8">
+<title>Presencia digital de las peñas celtistas</title>
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<style>
+  body { font-family: system-ui, Arial, sans-serif; margin: 24px; max-width: 1300px; }
+  h1 { margin: 0 0 6px; }
+  .meta { font-size: 14px; opacity: .8; margin: 0 0 12px; }
+  .bar { display:flex; gap:12px; align-items:center; flex-wrap:wrap; margin:12px 0; }
+  input { padding:8px 10px; min-width:320px; }
+  .pill { border:1px solid #ccc; border-radius:999px; padding:2px 8px; font-size:12px; }
+
+  table { width:100%; border-collapse:collapse; table-layout:fixed; }
+  th,td { border-bottom:1px solid #e5e5e5; padding:8px 6px; white-space:nowrap; overflow:hidden; text-overflow:ellipsis; }
+  th { background:#fafafa; cursor:pointer; position:sticky; top:0; user-select:none; }
+  tr:hover td { background:#f9f9f9; }
+
+  th.col-total, td.col-total { width:110px; text-align:right; }
+  th.col-pena,  td.col-pena  { width:340px; text-align:left; }
+  th.col-web,   td.col-web   { width:70px;  text-align:center; }
+  th.col-net,   td.col-net   { width:110px; text-align:right; }
+
+  a { color:inherit; text-decoration:underline; text-underline-offset:2px; }
+</style>
+</head>
+<body>
+
+<h1>Presencia digital de las peñas celtistas</h1>
+<div class="meta">Datos públicos. No es listado oficial ni ranking.</div>
+
+<div class="bar">
+  <input id="q" type="search" placeholder="Buscar peña, usuario o URL…">
+  <span id="count" class="pill">0 filas</span>
+  <span class="meta">CSV: <a id="csvLink" href="#">abrir</a></span>
+  <span id="updated" class="meta"></span>
+</div>
+
+<table>
+  <thead><tr id="hdr"></tr></thead>
+  <tbody id="body"></tbody>
+</table>
+
+<script>
+const CSV_FILE = "penas-celtistas-rrss.csv";
+document.getElementById("csvLink").href = CSV_FILE;
+
+const q = document.getElementById("q");
+const hdr = document.getElementById("hdr");
+const body = document.getElementById("body");
+const count = document.getElementById("count");
+const updated = document.getElementById("updated");
+
+const NF = new Intl.NumberFormat("es-ES", { useGrouping:true });
+
+function normHeader(h){ return String(h||"").trim().replace(/^\uFEFF/,""); }
+function isUrl(v){ return /^https?:\/\//i.test(String(v||"").trim()); }
+function isNum(v){
+  const s = String(v??"").trim();
+  if (s === "" || s === "0") return false;
+  const n = Number(s.replace(/\./g,"").replace(/,/g,""));
+  return Number.isFinite(n);
+}
+function toNum(v){ return Number(String(v??"").trim().replace(/\./g,"").replace(/,/g,"")); }
+function fmt(v){ return NF.format(toNum(v)); }
+
+// Definición de columnas (y su columna de URL asociada)
+const COLS = [
+  { key:"Total_rrss", label:"Total", cls:"col-total", urlKey:null },
+  { key:"Peñas",      label:"Peñas", cls:"col-pena",  urlKey:null },
+  { key:"web",        label:"Web",   cls:"col-web",   urlKey:"web_url" },
+  { key:"X",          label:"X",     cls:"col-net",   urlKey:"X_url" },
+  { key:"Instagram",  label:"Instagram", cls:"col-net", urlKey:"Instagram_url" },
+  { key:"Facebook",   label:"Facebook",  cls:"col-net", urlKey:"Facebook_url" },
+  { key:"Youtube",    label:"YouTube",   cls:"col-net", urlKey:"Youtube_url" },
+  { key:"TikTok",     label:"TikTok",    cls:"col-net", urlKey:"TikTok_url" },
+  { key:"Bluesky",    label:"Bluesky",   cls:"col-net", urlKey:"Bluesky_url" },
+  { key:"Feeberse",   label:"Feebers",   cls:"col-net", urlKey:"Feeberse_url" }
+];
+
+let headers = [];
+let rows = [];
+let visible = [];           // columnas realmente presentes
+let sortKey = "Peñas";
+let sortDir = 1;
+
+function renderHeader(){
+  hdr.innerHTML = "";
+  visible.forEach(c => {
+    const th = document.createElement("th");
+    th.className = c.cls;
+    th.innerHTML = `${c.label}<small>↕</small>`;
+    th.onclick = () => { sortDir = (sortKey===c.key) ? -sortDir : 1; sortKey=c.key; render(); };
+    hdr.appendChild(th);
+  });
+}
+
+function cellHTML(r, c){
+  const v = String(r[c.key] ?? "").trim();
+  if (v === "" || v === "0") return ""; // ocultar ceros y vacíos
+
+  // Total: número sin enlace
+  if (c.key === "Total_rrss") return isNum(v) ? fmt(v) : v;
+
+  // Peñas: texto
+  if (c.key === "Peñas") return v;
+
+  // Web: OK enlazable si web_url existe
+  if (c.key === "web") {
+    const u = c.urlKey ? String(r[c.urlKey] ?? "").trim() : "";
+    if (v.toUpperCase() === "OK" && isUrl(u)) return `<a href="${u}" target="_blank" rel="noopener noreferrer nofollow">OK</a>`;
+    return (v.toUpperCase() === "OK") ? "OK" : v;
+  }
+
+  // RRSS: número enlazable si *_url existe
+  if (isNum(v)) {
+    const label = fmt(v);
+    const u = c.urlKey ? String(r[c.urlKey] ?? "").trim() : "";
+    return isUrl(u) ? `<a href="${u}" target="_blank" rel="noopener noreferrer nofollow">${label}</a>` : label;
+  }
+
+  // Si viene texto o URL rara
+  if (isUrl(v)) return `<a href="${v}" target="_blank" rel="noopener noreferrer nofollow">enlace</a>`;
+  return v;
+}
+
+function render(){
+  const term = q.value.toLowerCase();
+  let list = rows.filter(r => Object.values(r).some(v => String(v||"").toLowerCase().includes(term)));
+
+  list.sort((a,b) => {
+    const av = String(a[sortKey] ?? "").trim();
+    const bv = String(b[sortKey] ?? "").trim();
+    if (isNum(av) && isNum(bv)) return (toNum(av) - toNum(bv)) * sortDir;
+    return av.localeCompare(bv, "es", { sensitivity:"base" }) * sortDir;
+  });
+
+  body.innerHTML = "";
+  for (const r of list) {
+    const tr = document.createElement("tr");
+    for (const c of visible) {
+      const td = document.createElement("td");
+      td.className = c.cls;
+      td.innerHTML = cellHTML(r, c);
+      tr.appendChild(td);
+    }
+    body.appendChild(tr);
+  }
+  count.textContent = `${list.length} filas`;
+
+  const fc = "fecha_actualizacion";
+  if (rows.length && headers.includes(fc)) {
+    const freq = {};
+    for (const r of list) {
+      const d = String(r[fc]||"").trim();
+      if (d) freq[d] = (freq[d]||0) + 1;
+    }
+    const top = Object.entries(freq).sort((x,y)=>y[1]-x[1])[0];
+    updated.textContent = top ? `Última actualización: ${top[0]}` : "";
+  }
+}
+
+fetch(CSV_FILE, { cache:"no-store" })
+  .then(r => r.text())
+  .then(t => {
+    const lines = t.split(/\r?\n/).filter(l => l.trim() !== "");
+    headers = lines[0].split(";").map(normHeader);
+
+    rows = lines.slice(1).map(line => {
+      const p = line.split(";");
+      const o = {};
+      headers.forEach((h,i)=> o[h] = (p[i] ?? "").trim());
+      return o;
+    });
+
+    // Solo mostramos columnas que existan (y su urlKey puede o no existir)
+    visible = COLS.filter(c => headers.includes(c.key));
+
+    renderHeader();
+    render();
+  });
+
+q.addEventListener("input", render);
+</script>
+
+</body>
+</html>
