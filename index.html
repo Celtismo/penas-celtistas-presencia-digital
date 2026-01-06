@@ -67,22 +67,12 @@
   let sortCol = null;
   let sortDir = 1; // 1 asc, -1 desc
 
-  function splitCSVLine(line) {
-    return line.split(";").map(s => s.trim());
-    const out = [];
-    let cur = "", inQ = false;
-    for (let i = 0; i < line.length; i++) {
-      const ch = line[i];
-      if (ch === '"') {
-        if (inQ && line[i+1] === '"') { cur += '"'; i++; }
-        else inQ = !inQ;
-      } else if (ch === "," && !inQ) {
-        out.push(cur); cur = "";
-      } else cur += ch;
-    }
-    out.push(cur);
-    return out.map(s => s.trim());
-  }
+ function splitCSVLine(line) {
+  // Detecta automáticamente ; o ,
+  const sep = line.includes(";") ? ";" : ",";
+  return line.split(sep).map(s => s.trim().replace(/^"|"$/g, ""));
+}
+
 
   function isNumeric(v) {
     if (v === null || v === undefined) return false;
