@@ -26,3 +26,7 @@ Si detectas errores u omisiones, puedes abrir una issue o proponer una correcci�
 
 ## Licencia
 Datos abiertos para uso informativo.
+
+## Palabras clave
+peñas celtistas, celtismo, RC Celta, afición celeste, redes sociales peñas,
+seguidores peñas celtistas, presencia digital celtismo
