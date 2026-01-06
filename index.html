@@ -1,0 +1,235 @@
+<!doctype html>
+<html lang="es">
+<head>
+  <meta charset="utf-8" />
+  <meta name="viewport" content="width=device-width,initial-scale=1" />
+  <title>Presencia digital de las peñas celtistas</title>
+  <meta name="description" content="Datos públicos sobre la presencia en internet y redes sociales de las peñas celtistas." />
+  <style>
+    :root { font-family: system-ui, -apple-system, Segoe UI, Roboto, Arial, sans-serif; }
+    body { margin: 0; padding: 24px; max-width: 1200px; }
+    h1 { margin: 0 0 8px; font-size: 28px; }
+    p { margin: 6px 0 14px; line-height: 1.4; }
+    .bar { display: flex; gap: 12px; flex-wrap: wrap; align-items: center; margin: 14px 0; }
+    input[type="search"] { padding: 10px 12px; font-size: 14px; min-width: 320px; }
+    .meta { font-size: 13px; opacity: 0.8; }
+    .pill { display: inline-block; padding: 2px 8px; border: 1px solid #ddd; border-radius: 999px; font-size: 12px; }
+    table { width: 100%; border-collapse: collapse; margin-top: 10px; }
+    th, td { border-bottom: 1px solid #e6e6e6; padding: 10px 8px; text-align: left; vertical-align: top; }
+    th { position: sticky; top: 0; background: #fff; cursor: pointer; user-select: none; white-space: nowrap; }
+    th .hint { font-weight: normal; opacity: .55; font-size: 12px; margin-left: 6px; }
+    tr:hover td { background: #fafafa; }
+    a { color: inherit; }
+    .num { text-align: right; font-variant-numeric: tabular-nums; }
+    .wrap { word-break: break-word; }
+    .small { font-size: 12px; opacity: .75; }
+  </style>
+</head>
+<body>
+  <h1>Presencia digital de las peñas celtistas</h1>
+  <p class="meta">
+    Dataset informativo basado únicamente en datos públicos. No es un listado oficial ni un ranking de importancia.
+  </p>
+
+  <div class="bar">
+    <input id="q" type="search" placeholder="Buscar peña, usuario o URL…" />
+    <span id="count" class="pill">0 filas</span>
+    <span class="meta">CSV: <a id="csvLink" href="#" rel="nofollow">abrir</a></span>
+    <span class="meta" id="updated"></span>
+  </div>
+
+  <table>
+    <thead><tr id="hdr"></tr></thead>
+    <tbody id="body"></tbody>
+  </table>
+
+  <p class="small">Tip: clic en una cabecera para ordenar.</p>
+
+<script>
+  // === CONFIG ===
+  const CSV_FILE = "#Peñas_RRSS.csv"; // tu fichero actual en el repo
+
+  // Mapeo fijo por POSICIÓN (porque la cabecera del CSV de Excel suele venir rota)
+  // Si tu CSV cambiase de orden de columnas en el futuro, habría que ajustar esto.
+  const COLS_BY_INDEX = [
+    { key: "seg",   label: "Seg" },        // 0
+    { key: "pena",  label: "Peña" },       // 1
+    { key: "web",   label: "Web" },        // 2
+    { key: "x",     label: "X" },          // 3
+    { key: "insta", label: "Instagram" },  // 4
+    { key: "fb",    label: "Facebook" },   // 5
+    { key: "yt",    label: "YouTube" },    // 6
+    { key: "tt",    label: "TikTok" },     // 7
+    { key: "bsky",  label: "Bluesky" },    // 8
+    { key: "feeb",  label: "Feebers" },    // 9 (si lo usas)
+    { key: "date",  label: "Actualización" } // 10 (si existe; si no, quedará vacío)
+  ];
+
+  // Columnas que realmente mostramos (evitamos “Seg” si no te interesa: quítala de aquí)
+  const VISIBLE = ["pena","web","x","insta","fb","yt","tt","bsky","feeb","date"];
+
+  // === DOM ===
+  const q = document.getElementById("q");
+  const hdr = document.getElementById("hdr");
+  const body = document.getElementById("body");
+  const count = document.getElementById("count");
+  const csvLink = document.getElementById("csvLink");
+  const updated = document.getElementById("updated");
+  csvLink.href = CSV_FILE;
+
+  // === STATE ===
+  let rows = [];
+  let sortKey = "pena";
+  let sortDir = 1;
+
+  function stripBOM(s) { return s.replace(/^\uFEFF/, ""); }
+
+  // Parser simple pero correcto para ; con comillas
+  function splitSemicolonLine(line) {
+    const out = [];
+    let cur = "", inQ = false;
+    for (let i = 0; i < line.length; i++) {
+      const ch = line[i];
+      if (ch === '"') {
+        if (inQ && line[i+1] === '"') { cur += '"'; i++; }
+        else inQ = !inQ;
+      } else if (ch === ";" && !inQ) {
+        out.push(cur); cur = "";
+      } else cur += ch;
+    }
+    out.push(cur);
+    return out.map(s => s.trim());
+  }
+
+  function isNum(v) {
+    const s = String(v ?? "").trim();
+    if (!s) return false;
+    return !Number.isNaN(Number(s));
+  }
+
+  // Intenta convertir un “campo mixto” típico de tu export:
+  // - puede ser "OK"
+  // - puede ser "usuario"
+  // - puede ser "https://..."
+  // - puede ser número seguidores
+  function formatCell(key, raw) {
+    const v = String(raw ?? "").trim();
+    if (!v) return "";
+
+    // si es 0, lo ocultamos (en tus datos 0 suele significar “no hay”)
+    if (v === "0") return "";
+
+    // URLs
+    if (v.startsWith("http://") || v.startsWith("https://")) {
+      const safe = v.replace(/"/g, "&quot;");
+      return `<a class="wrap" href="${safe}" target="_blank" rel="noopener noreferrer nofollow">${safe}</a>`;
+    }
+
+    // Para "web": si viene "OK" lo mostramos como OK
+    if (key === "web" && v.toUpperCase() === "OK") return "OK";
+
+    // Texto normal
+    return `<span class="wrap">${v.replace(/</g,"&lt;").replace(/>/g,"&gt;")}</span>`;
+  }
+
+  function renderHeader() {
+    hdr.innerHTML = "";
+    for (const k of VISIBLE) {
+      const meta = COLS_BY_INDEX.find(c => c.key === k);
+      const th = document.createElement("th");
+      th.textContent = meta ? meta.label : k;
+      const hint = document.createElement("span");
+      hint.className = "hint";
+      hint.textContent = "↕";
+      th.appendChild(hint);
+
+      th.addEventListener("click", () => {
+        if (sortKey === k) sortDir *= -1;
+        else { sortKey = k; sortDir = 1; }
+        apply();
+      });
+
+      hdr.appendChild(th);
+    }
+  }
+
+  function apply() {
+    const term = q.value.trim().toLowerCase();
+
+    let list = rows;
+    if (term) {
+      list = rows.filter(r => VISIBLE.some(k => String(r[k] ?? "").toLowerCase().includes(term)));
+    }
+
+    list = [...list].sort((a,b) => {
+      const av = String(a[sortKey] ?? "").trim();
+      const bv = String(b[sortKey] ?? "").trim();
+      const an = isNum(av) ? Number(av) : null;
+      const bn = isNum(bv) ? Number(bv) : null;
+      if (an !== null && bn !== null) return (an - bn) * sortDir;
+      return av.localeCompare(bv, "es", { sensitivity: "base" }) * sortDir;
+    });
+
+    body.innerHTML = "";
+    for (const r of list) {
+      const tr = document.createElement("tr");
+      for (const k of VISIBLE) {
+        const td = document.createElement("td");
+        const val = r[k] ?? "";
+        if (isNum(val) && (k === "x" || k === "insta" || k === "fb" || k === "yt" || k === "tt" || k === "bsky" || k === "feeb")) {
+          td.className = "num";
+          td.textContent = String(val).trim() === "0" ? "" : String(val).trim();
+        } else {
+          td.innerHTML = formatCell(k, val);
+        }
+        tr.appendChild(td);
+      }
+      body.appendChild(tr);
+    }
+
+    count.textContent = `${list.length} filas`;
+
+    // fecha más común
+    const freq = {};
+    for (const r of list) {
+      const d = String(r.date ?? "").trim();
+      if (d) freq[d] = (freq[d] || 0) + 1;
+    }
+    const best = Object.entries(freq).sort((a,b)=>b[1]-a[1])[0];
+    updated.textContent = best ? `Última actualización: ${best[0]}` : "";
+  }
+
+  async function load() {
+    const res = await fetch(CSV_FILE, { cache: "no-store" });
+    if (!res.ok) {
+      document.body.insertAdjacentHTML("beforeend",
+        `<p class="small">No se pudo cargar el CSV (${CSV_FILE}).</p>`);
+      return;
+    }
+    const text = await res.text();
+    const lines = text.split(/\r?\n/).filter(l => l.trim() !== "");
+    if (lines.length < 2) return;
+
+    // Ignoramos cabecera original de Excel (suele tener columnas vacías y caracteres raros)
+    const dataLines = lines.slice(1);
+
+    rows = dataLines.map(line => {
+      line = stripBOM(line);
+      const parts = splitSemicolonLine(line);
+
+      const obj = {};
+      // Por seguridad: si hay menos columnas, rellenamos con vacío
+      COLS_BY_INDEX.forEach((c, idx) => obj[c.key] = (parts[idx] ?? "").replace(/^"|"$/g,"").trim());
+
+      return obj;
+    });
+
+    renderHeader();
+    apply();
+  }
+
+  q.addEventListener("input", apply);
+  load();
+</script>
+</body>
+</html>
