@@ -1,0 +1,240 @@
+<!doctype html>
+<html lang="es">
+<head>
+  <meta charset="utf-8">
+  <title>Presencia digital de las peñas celtistas</title>
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <meta name="description" content="Datos públicos sobre la presencia en internet y redes sociales de las peñas celtistas.">
+  <style>
+    body { font-family: system-ui, -apple-system, Segoe UI, Roboto, Arial, sans-serif; margin: 24px; max-width: 1200px; }
+    h1 { margin: 0 0 6px; }
+    .meta { font-size: 14px; opacity: .8; margin: 0 0 12px; }
+    .bar { display: flex; gap: 12px; align-items: center; flex-wrap: wrap; margin: 12px 0; }
+    input { padding: 8px 10px; font-size: 14px; min-width: 280px; }
+    .pill { border: 1px solid #ccc; border-radius: 999px; padding: 2px 8px; font-size: 12px; }
+    table { width: 100%; border-collapse: collapse; margin-top: 8px; table-layout: fixed; }
+
+    th, td {
+      border-bottom: 1px solid #e5e5e5;
+      padding: 8px 6px;
+      vertical-align: top;
+      overflow: hidden;
+      text-overflow: ellipsis;
+      white-space: nowrap;
+    }
+    th { cursor: pointer; background: #fafafa; position: sticky; top: 0; user-select: none; }
+    th small { opacity: .5; margin-left: 4px; }
+    tr:hover td { background: #f9f9f9; }
+    a { color: inherit; text-decoration: none; }
+
+    th.col-pena, td.col-pena { width: 260px; text-align: left; }
+    th.col-web,  td.col-web  { width: 80px;  text-align: center; }
+    th.col-net,  td.col-net  { width: 110px; text-align: right; }
+
+    .wrap { word-break: break-word; }
+  </style>
+</head>
+<body>
+
+<h1>Presencia digital de las peñas celtistas</h1>
+<div class="meta">
+  Dataset informativo basado únicamente en datos públicos. No es un listado oficial ni un ranking de importancia.
+</div>
+
+<div class="bar">
+  <input id="q" type="search" placeholder="Buscar peña, usuario o URL…">
+  <span id="count" class="pill">0 filas</span>
+  <span class="meta">CSV: <a id="csvLink" href="#">abrir</a></span>
+  <span id="updated" class="meta"></span>
+</div>
+
+<table>
+  <thead>
+    <tr id="hdr"></tr>
+  </thead>
+  <tbody id="body"></tbody>
+</table>
+
+<script>
+/* ================= CONFIG ================= */
+const CSV_FILE = "penas-celtistas-rrss.csv";
+
+const WANTED_COLS = [
+  "Peñas",
+  "web",
+  "X",
+  "Instagram",
+  "Facebook",
+  "Youtube",
+  "TikTok",
+  "Bluesky",
+  "Feebers"
+];
+
+// Icono + nombre (claridad total)
+const COL_LABELS = {
+  "Peñas": "Peñas",
+  "web": "🌐 Web",
+  "X": "𝕏 X",
+  "Instagram": "📸 Instagram",
+  "Facebook": "📘 Facebook",
+  "Youtube": "▶️ YouTube",
+  "TikTok": "🎵 TikTok",
+  "Bluesky": "🦋 Bluesky",
+  "Feebers": "📰 Feebers"
+};
+
+/* ================= DOM ================= */
+const q = document.getElementById("q");
+const hdr = document.getElementById("hdr");
+const body = document.getElementById("body");
+const count = document.getElementById("count");
+const csvLink = document.getElementById("csvLink");
+const updated = document.getElementById("updated");
+csvLink.href = CSV_FILE;
+
+/* ================= STATE ================= */
+let rows = [];
+let cols = [];
+let sortCol = "Peñas";
+let sortDir = 1;
+
+/* ================= UTILS ================= */
+function stripBOM(s){ return s.replace(/^\uFEFF/, ""); }
+
+function parseCSV(text){
+  const lines = text.split(/\r?\n/).filter(l => l.trim() !== "");
+  const header = stripBOM(lines[0]).split(";").map(h => h.trim());
+  const data = lines.slice(1).map(line => {
+    const parts = line.split(";");
+    const o = {};
+    header.forEach((h,i) => o[h] = (parts[i] || "").trim());
+    return o;
+  });
+  return { header, data };
+}
+
+function isNum(v){
+  const s = String(v ?? "").trim();
+  if (s === "" || s === "0") return false;
+  const n = Number(s.replace(/\./g,"").replace(/,/g,""));
+  return Number.isFinite(n);
+}
+
+const NF = new Intl.NumberFormat("es-ES", { useGrouping: true });
+
+function formatNum(v){
+  const s = String(v ?? "").trim();
+  const n = Number(s.replace(/\./g,"").replace(/,/g,""));
+  return Number.isFinite(n) ? NF.format(n) : v;
+}
+
+function isUrl(v){
+  return v.startsWith("http://") || v.startsWith("https://");
+}
+
+function renderCellHTML(v){
+  const s = String(v ?? "").trim();
+  if (!s || s === "0") return "";
+
+  if (isUrl(s)) {
+    return `<a class="wrap" href="${s}" target="_blank" rel="noopener noreferrer nofollow">enlace</a>`;
+  }
+
+  if (s.toUpperCase() === "OK") return "OK";
+
+  if (isNum(s)) return formatNum(s);
+
+  return `<span class="wrap">${s.replace(/</g,"&lt;").replace(/>/g,"&gt;")}</span>`;
+}
+
+function colClass(c){
+  if (c === "Peñas") return "col-pena";
+  if (c === "web") return "col-web";
+  return "col-net";
+}
+
+/* ================= RENDER ================= */
+function renderHeader(){
+  hdr.innerHTML = "";
+  cols.forEach(c => {
+    const th = document.createElement("th");
+    th.classList.add(colClass(c));
+    th.innerHTML = `${COL_LABELS[c] || c}<small>↕</small>`;
+    th.onclick = () => {
+      sortDir = (sortCol === c) ? -sortDir : 1;
+      sortCol = c;
+      render();
+    };
+    hdr.appendChild(th);
+  });
+}
+
+function render(){
+  const term = q.value.toLowerCase();
+
+  let list = rows.filter(r =>
+    cols.some(c => String(r[c] || "").toLowerCase().includes(term))
+  );
+
+  list = list.slice().sort((a,b) => {
+    const av = String(a[sortCol] || "").trim();
+    const bv = String(b[sortCol] || "").trim();
+    if (isNum(av) && isNum(bv)) {
+      const an = Number(av.replace(/\./g,"").replace(/,/g,""));
+      const bn = Number(bv.replace(/\./g,"").replace(/,/g,""));
+      return (an - bn) * sortDir;
+    }
+    return av.localeCompare(bv, "es", { sensitivity: "base" }) * sortDir;
+  });
+
+  body.innerHTML = "";
+  list.forEach(r => {
+    const tr = document.createElement("tr");
+    cols.forEach(c => {
+      const td = document.createElement("td");
+      td.classList.add(colClass(c));
+      td.innerHTML = renderCellHTML(r[c]);
+      tr.appendChild(td);
+    });
+    body.appendChild(tr);
+  });
+
+  count.textContent = `${list.length} filas`;
+
+  // fecha arriba (aunque no salga como columna)
+  const fc = "fecha_actualizacion";
+  if (rows.length && (fc in rows[0])) {
+    const freq = {};
+    list.forEach(r => {
+      const d = String(r[fc] || "").trim();
+      if (d) freq[d] = (freq[d] || 0) + 1;
+    });
+    const top = Object.entries(freq).sort((a,b)=>b[1]-a[1])[0];
+    updated.textContent = top ? `Última actualización: ${top[0]}` : "";
+  }
+}
+
+/* ================= LOAD ================= */
+async function load(){
+  const res = await fetch(CSV_FILE, { cache: "no-store" });
+  if (!res.ok) {
+    updated.textContent = "No se pudo cargar el CSV.";
+    return;
+  }
+  const text = await res.text();
+  const parsed = parseCSV(text);
+
+  cols = WANTED_COLS.filter(c => parsed.header.includes(c));
+  rows = parsed.data;
+
+  renderHeader();
+  render();
+}
+
+q.addEventListener("input", render);
+load();
+</script>
+
+</body>
+</html>
