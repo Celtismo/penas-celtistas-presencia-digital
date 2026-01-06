@@ -120,9 +120,11 @@ function isNum(v){
 }
 
 function formatNum(v){
-  return Number(v).toLocaleString("es-ES");
+  const n = Number(String(v).replace(/\./g,"").replace(/,/g,""));
+  return isNaN(n) ? v : n.toLocaleString("es-ES");
 }
 
+  
 function isUrl(v){
   return v.startsWith("http://") || v.startsWith("https://");
 }
