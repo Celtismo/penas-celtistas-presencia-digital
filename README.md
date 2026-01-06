@@ -3,6 +3,8 @@
 Este repositorio recopila información pública sobre la presencia en internet
 y redes sociales de las peñas celtistas.
 
+📄 Dataset: penas-celtistas-rrss.csv
+
 ## Qué es
 - Un dataset informativo basado únicamente en datos públicos.
 - Una foto fija de la presencia digital en una fecha concreta.
