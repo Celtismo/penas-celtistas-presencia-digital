@@ -1,0 +1,255 @@
+<!doctype html>
+<html lang="es">
+<head>
+  <meta charset="utf-8">
+  <title>Presencia digital de las peñas celtistas</title>
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <style>
+    body { font-family: system-ui, -apple-system, Segoe UI, Roboto, Arial, sans-serif; margin: 24px; max-width: 1400px; }
+    h1 { margin: 0 0 6px; }
+    .meta { font-size: 14px; opacity: .8; margin: 0 0 12px; }
+    .bar { display:flex; gap:12px; align-items:center; flex-wrap:wrap; margin:12px 0; }
+    input { padding:8px 10px; font-size:14px; min-width:320px; }
+    .pill { border:1px solid #ccc; border-radius:999px; padding:2px 8px; font-size:12px; }
+
+    table { width:100%; border-collapse:collapse; table-layout:fixed; }
+    th,td { border-bottom:1px solid #e5e5e5; padding:8px 6px; white-space:nowrap; overflow:hidden; text-overflow:ellipsis; vertical-align:top; }
+    th { background:#fafafa; cursor:pointer; position:sticky; top:0; user-select:none; }
+    th small { opacity:.5; margin-left:4px; }
+    tr:hover td { background:#f9f9f9; }
+
+    a { color:inherit; text-decoration:underline; text-underline-offset:2px; }
+
+    th.col-total, td.col-total { width:110px; text-align:right; }
+    th.col-pena,  td.col-pena  { width:360px; text-align:left; }
+    th.col-web,   td.col-web   { width:70px;  text-align:center; }
+    th.col-net,   td.col-net   { width:110px; text-align:right; }
+  </style>
+</head>
+<body>
+
+<h1>Presencia digital de las peñas celtistas</h1>
+<div class="meta">Datos públicos. No es listado oficial ni ranking.</div>
+
+<div class="bar">
+  <input id="q" type="search" placeholder="Buscar peña, usuario o URL…">
+  <span id="count" class="pill">0 filas</span>
+  <span class="meta">CSV: <a id="csvLink" href="#">abrir</a></span>
+  <span id="updated" class="meta"></span>
+</div>
+
+<table>
+  <thead><tr id="hdr"></tr></thead>
+  <tbody id="body"></tbody>
+</table>
+
+<script>
+const CSV_FILE = "penas-celtistas-rrss.csv";
+document.getElementById("csvLink").href = CSV_FILE;
+
+const q = document.getElementById("q");
+const hdr = document.getElementById("hdr");
+const body = document.getElementById("body");
+const count = document.getElementById("count");
+const updated = document.getElementById("updated");
+
+const NF = new Intl.NumberFormat("es-ES", { useGrouping:true });
+
+function stripBOM(s){ return String(s||"").replace(/^\uFEFF/,""); }
+function isUrl(v){ return /^https?:\/\//i.test(String(v||"").trim()); }
+function cleanHandle(v){ return String(v||"").trim().replace(/^@/,""); }
+function esc(s){ return String(s??"").replace(/&/g,"&amp;").replace(/</g,"&lt;").replace(/>/g,"&gt;"); }
+
+function toNum(v){
+  const s = String(v ?? "").trim();
+  if (!s) return null;
+  const n = Number(s.replace(/\./g,"").replace(/,/g,""));
+  return Number.isFinite(n) ? n : null;
+}
+function fmtNum(v){
+  const n = toNum(v);
+  return n === null ? "" : NF.format(n);
+}
+
+function normalizeHeaders(raw){
+  // 1) limpiar BOM + trim
+  let h = raw.map(x => stripBOM(x).trim());
+
+  // 2) si hay cabeceras vacías, poner nombres según la columna anterior
+  for (let i=0;i<h.length;i++){
+    if (h[i]) continue;
+
+    const prev = (i>0) ? h[i-1] : "";
+    if (i === 0) h[i] = "id";
+    else if (prev === "web") h[i] = "url_web";
+    else if (prev === "X") h[i] = "cta_x";
+    else if (prev === "Instagram") h[i] = "cta_instagram";
+    else if (prev === "Facebook") h[i] = "url_facebook";
+    else if (prev === "Youtube") h[i] = "url_yt";
+    else if (prev === "TikTok") h[i] = "url_tt";
+    else if (prev === "Bluesky") h[i] = "url_bs";
+    else h[i] = `unnamed_${i}`;
+  }
+
+  return h;
+}
+
+function buildLink(col, extraRaw){
+  const extra = String(extraRaw||"").trim();
+  if (!extra) return null;
+  if (isUrl(extra)) return extra;
+
+  const h = cleanHandle(extra);
+  if (!h) return null;
+
+  if (col === "X") return `https://x.com/${encodeURIComponent(h)}`;
+  if (col === "Instagram") return `https://www.instagram.com/${encodeURIComponent(h)}/`;
+  if (col === "TikTok") return `https://www.tiktok.com/@${encodeURIComponent(h)}`;
+  if (col === "Bluesky") return `https://bsky.app/profile/${encodeURIComponent(h)}`;
+
+  // Facebook/Youtube/Feeberse: no inventamos si no hay URL
+  return null;
+}
+
+const DISPLAY = [
+  { key:"Seg", label:"Total", cls:"col-total" },
+  { key:"peña", label:"Peña", cls:"col-pena" },
+  { key:"web", label:"Web", cls:"col-web" },
+  { key:"X", label:"X", cls:"col-net" },
+  { key:"Instagram", label:"Instagram", cls:"col-net" },
+  { key:"Facebook", label:"Facebook", cls:"col-net" },
+  { key:"Youtube", label:"YouTube", cls:"col-net" },
+  { key:"TikTok", label:"TikTok", cls:"col-net" },
+  { key:"Bluesky", label:"Bluesky", cls:"col-net" },
+  { key:"Feeberse", label:"Feebers", cls:"col-net" }
+];
+
+let headers = [];
+let rows = [];
+let sortKey = "peña";
+let sortDir = 1;
+
+function renderHeader(){
+  hdr.innerHTML = "";
+  for (const c of DISPLAY){
+    if (!headers.includes(c.key)) continue;
+    const th = document.createElement("th");
+    th.className = c.cls;
+    th.innerHTML = `${c.label}<small>↕</small>`;
+    th.onclick = () => {
+      sortDir = (sortKey === c.key) ? -sortDir : 1;
+      sortKey = c.key;
+      render();
+    };
+    hdr.appendChild(th);
+  }
+}
+
+function cellHTML(r, key){
+  const v = String(r[key] ?? "").trim();
+
+  if (key === "Seg") return fmtNum(v);
+
+  if (key === "peña") return `<span>${esc(v)}</span>`;
+
+  if (key === "web") {
+    if (!v) return "";
+    const url = String(r["url_web"] ?? "").trim();
+    if (v.toUpperCase() === "OK" && isUrl(url)) {
+      return `<a href="${url}" target="_blank" rel="noopener noreferrer nofollow">OK</a>`;
+    }
+    return esc(v.toUpperCase() === "OK" ? "OK" : v);
+  }
+
+  // RRSS: ocultar ceros
+  const n = toNum(v);
+  if (n === null || n === 0) return "";
+
+  const label = NF.format(n);
+
+  // elegir columna extra según red
+  let extra = "";
+  if (key === "X") extra = r["cta_x"];
+  else if (key === "Instagram") extra = r["cta_instagram"];
+  else if (key === "Facebook") extra = r["url_facebook"];
+  else if (key === "Youtube") extra = r["url_yt"];
+  else if (key === "TikTok") extra = r["url_tt"];
+  else if (key === "Bluesky") extra = r["url_bs"];
+  // Feeberse: si en el CSV añadiste columna url, soporta también "url_feebers"
+  else if (key === "Feeberse") extra = r["url_feebers"] || "";
+
+  const url = buildLink(key, extra);
+  return url
+    ? `<a href="${url}" target="_blank" rel="noopener noreferrer nofollow">${label}</a>`
+    : label;
+}
+
+function render(){
+  const term = q.value.toLowerCase();
+
+  let list = rows.filter(r => {
+    if (!term) return true;
+    // busca en todas las columnas
+    return headers.some(h => String(r[h] ?? "").toLowerCase().includes(term));
+  });
+
+  list.sort((a,b) => {
+    const av = String(a[sortKey] ?? "").trim();
+    const bv = String(b[sortKey] ?? "").trim();
+    const an = toNum(av), bn = toNum(bv);
+    if (an !== null && bn !== null) return (an - bn) * sortDir;
+    return av.localeCompare(bv, "es", { sensitivity:"base" }) * sortDir;
+  });
+
+  body.innerHTML = "";
+  for (const r of list){
+    const tr = document.createElement("tr");
+    for (const c of DISPLAY){
+      if (!headers.includes(c.key)) continue;
+      const td = document.createElement("td");
+      td.className = c.cls;
+      td.innerHTML = cellHTML(r, c.key);
+      tr.appendChild(td);
+    }
+    body.appendChild(tr);
+  }
+
+  count.textContent = `${list.length} filas`;
+
+  const fc = "fecha_actualizacion";
+  if (headers.includes(fc)) {
+    const freq = {};
+    for (const r of list) {
+      const d = String(r[fc] || "").trim();
+      if (d) freq[d] = (freq[d] || 0) + 1;
+    }
+    const top = Object.entries(freq).sort((x,y)=>y[1]-x[1])[0];
+    updated.textContent = top ? `Última actualización: ${top[0]}` : "";
+  } else {
+    updated.textContent = "";
+  }
+}
+
+fetch(CSV_FILE, { cache:"no-store" })
+  .then(r => r.text())
+  .then(text => {
+    const lines = text.split(/\r?\n/).filter(l => l.trim() !== "");
+    const rawHeaders = lines[0].split(";");
+    headers = normalizeHeaders(rawHeaders);
+
+    rows = lines.slice(1).map(line => {
+      const parts = line.split(";");
+      const o = {};
+      headers.forEach((h,i) => o[h] = (parts[i] ?? "").trim());
+      return o;
+    });
+
+    renderHeader();
+    render();
+  });
+
+q.addEventListener("input", render);
+</script>
+
+</body>
+</html>
